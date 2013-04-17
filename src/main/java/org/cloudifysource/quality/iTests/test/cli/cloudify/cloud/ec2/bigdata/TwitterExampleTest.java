@@ -3,12 +3,15 @@ package org.cloudifysource.quality.iTests.test.cli.cloudify.cloud.ec2.bigdata;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.commons.io.FileUtils;
+import org.cloudifysource.dsl.internal.DSLException;
 import org.cloudifysource.dsl.internal.ServiceReader;
 import org.cloudifysource.quality.iTests.framework.tools.SGTestHelper;
 import org.cloudifysource.quality.iTests.framework.utils.AssertUtils;
+import org.cloudifysource.quality.iTests.framework.utils.IOUtils;
 import org.cloudifysource.quality.iTests.framework.utils.LogUtils;
 import org.cloudifysource.quality.iTests.framework.utils.SSHUtils;
 import org.cloudifysource.quality.iTests.framework.utils.ScriptUtils;
@@ -32,9 +35,11 @@ public class TwitterExampleTest extends NewAbstractCloudTest {
 	private String username = "tgrid";
 	private String password = "tgrid";
 	private String restUrl;
-	private String applicationName;
+	private String devAppName;
+	private String prodAppName;
 	private final String applicationFolderName = "bigDataApp";
-	private final String streamingApplicationFolderName = "streaming-bigdata";
+	private final String prodAppFolderName = "streaming-bigdata";
+	private final String devAppFolderName = prodAppFolderName + "-dev";
 	private final static int REPEATS = 3;
 	private static final String GLOBAL_COUNTER_PROPERTY = "org.openspaces.bigdata.common.counters.GlobalCounter";
 	private final static String ENTRIES_AMOUNT_REST_URL = "/admin/Spaces/Names/space/Spaces/Names/space/RuntimeDetails/CountPerClassName/" + GLOBAL_COUNTER_PROPERTY;
@@ -42,6 +47,7 @@ public class TwitterExampleTest extends NewAbstractCloudTest {
 	@BeforeClass(alwaysRun = true)
 	protected void bootstrap() throws Exception {
 		super.bootstrap();
+		prepareApplication();
 	}
 
 	@AfterClass(alwaysRun = true)
@@ -49,25 +55,20 @@ public class TwitterExampleTest extends NewAbstractCloudTest {
 		super.teardown();
 	}
 	
-	@BeforeMethod
-	public void prepareApplication() throws IOException, InterruptedException {
-		String buildDir = SGTestHelper.getBuildDir();
-		File appFolder = new File(buildDir + "/recipes/apps/" + streamingApplicationFolderName);
-		String hostAddress = "127.0.0.1";
-		
-		SSHUtils.runCommand(hostAddress, AbstractTestSupport.DEFAULT_TEST_TIMEOUT * 2,
-				"cd " + appFolder + ";" + "mvn install", username, password);
-
-	}
-
 	@Test(timeOut = AbstractTestSupport.DEFAULT_TEST_TIMEOUT * 4, enabled = true)
-	public void testTwitter() throws Exception {
-		LogUtils.log("installing application " + streamingApplicationFolderName + " on " + this.getCloudName());
-		
-		String applicationPath = ScriptUtils.getBuildPath() + "/recipes/apps/" + streamingApplicationFolderName + "/" + applicationFolderName;
-		File applicationDslFilePath = new File(applicationPath + "/bigDataApp-application.groovy");
-		applicationName = ServiceReader.getApplicationFromFile(applicationDslFilePath).getApplication().getName();			
-		installApplicationAndWait(applicationPath, applicationName);
+	public void testTwitterDev() throws Exception {
+		testTwitter(devAppFolderName, devAppName);
+	}
+	
+	@Test(timeOut = AbstractTestSupport.DEFAULT_TEST_TIMEOUT * 4, enabled = true)
+	public void testTwitterProd() throws Exception {
+		testTwitter(prodAppFolderName, prodAppName);
+	}
+	
+	private void testTwitter(String appFolderName, String appName) throws Exception {
+		LogUtils.log("installing application " + appFolderName + " on " + this.getCloudName());
+					
+		installApplicationAndWait(getApplicationPath(appFolderName), appName);
 		
 		LogUtils.log("verifing successful installation");
 		restUrl = getRestUrl();
@@ -105,7 +106,7 @@ public class TwitterExampleTest extends NewAbstractCloudTest {
 			entriesAmount = newEntriesAmount;
 		}
 		
-		uninstallApplicationAndWait(applicationName);
+		uninstallApplicationAndWait(appName);
 		
 		super.scanForLeakedAgentNodes();
 	}
@@ -135,6 +136,48 @@ public class TwitterExampleTest extends NewAbstractCloudTest {
 		final JavaType javaType = TypeFactory.type(Map.class);
 		ObjectMapper om = new ObjectMapper();
 		return om.readValue(response, javaType);
+	}
+
+
+	private void prepareApplication() throws IOException, InterruptedException, DSLException {
+		final String recipesDir = getRecipesDir();
+		
+		File prodAppFolder = new File(recipesDir+ prodAppFolderName);
+		String hostAddress = "127.0.0.1";
+		SSHUtils.runCommand(hostAddress, AbstractTestSupport.DEFAULT_TEST_TIMEOUT * 2,
+				"cd " + prodAppFolder + ";" + "mvn install", username, password);
+		
+		File devAppFolder = new File(recipesDir + devAppFolderName);
+		FileUtils.copyDirectory(prodAppFolder, devAppFolder);
+		replaceSpringProfilesActive(devAppFolder,"feeder", "twitter-feeder", "list-feeder");
+		replaceSpringProfilesActive(devAppFolder,"processor", "cassandra-archiver,cassandra-discovery", "file-archiver");
+		SSHUtils.runCommand(hostAddress, AbstractTestSupport.DEFAULT_TEST_TIMEOUT * 2,
+				"cd " + devAppFolder + ";" + "mvn install", username, password);
+		
+		String applicationPath = getApplicationPath(devAppFolderName);
+		File applicationDslFilePath = new File(applicationPath + "/bigDataApp-application.groovy");
+		String appName = ServiceReader.getApplicationFromFile(applicationDslFilePath).getApplication().getName();
+		devAppName = appName + "-dev";
+		prodAppName = appName + "-prod";
+	}
+
+	private String getRecipesDir() {
+		final String recipesDir = SGTestHelper.getBuildDir() + "/recipes/apps/";
+		return recipesDir;
+	}
+
+	private String getApplicationPath(String appFolderName) {
+		return getRecipesDir() + appFolderName + "/" + applicationFolderName;
+	}
+
+	/**
+	 * Modify the service recipe to use a different spring profile
+	 */
+	private void replaceSpringProfilesActive(File appFolder, String module, String oldProfile, String newProfile) throws IOException {
+		String recipeFile = appFolder+"/"+applicationFolderName+"/"+module+"/"+module+"-service.groovy";
+		IOUtils.replaceTextInFile(recipeFile,
+				"springProfilesActive \""+oldProfile+"\"", 
+				"springProfilesActive \""+newProfile+"\"");
 	}
 
 }

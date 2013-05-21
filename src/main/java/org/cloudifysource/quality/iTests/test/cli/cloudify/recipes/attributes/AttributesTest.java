@@ -333,7 +333,10 @@ public class AttributesTest extends AbstractLocalCloudTest {
 				+ "; invoke setter getService ;invoke setter getService2");
 		assertTrue("get myKey command should return null after myKey was removed" , getOutputAfterRemove.contains("null"));
 		assertTrue("myKey2 should not be affected by remove myKey" , getOutputAfterRemove.contains("myValue2"));
+		String getOutputAfterRemoveWrongAtt = runCommand("connect " +restUrl+ ";use-application attributesTestApp; remove-attributes myKey2") ;
+		AssertUtils.assertFalse("remove attribute of unknown attribute (myKey2) should fail", getOutputAfterRemoveWrongAtt.contains("removed successfully"));
 		uninstallApplication();
+		
 	}
 	@Test(timeOut = DEFAULT_TEST_TIMEOUT , groups="1", enabled = true)
 	public void testRemoveInstance() throws Exception {

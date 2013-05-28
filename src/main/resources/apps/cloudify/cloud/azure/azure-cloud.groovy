@@ -88,7 +88,41 @@ cloud {
 						"azure.pfx.password" : pfxPassword
 					])
 				},
-			
+            UBUNTU : computeTemplate{
+
+
+                imageId "0b11de9248dd4d87b18621318e037d37__RightImage-Ubuntu-12.04-x64-v13.4"
+                machineMemoryMB 1600
+                hardwareId "Small"
+                localDirectory "upload"
+
+                username username
+                password password
+
+                remoteDirectory "/home/${username}/gs-files"
+
+                custom ([
+
+                        // Optional. each availability set represents a different fault domain.
+
+                        "azure.availability.set" : "ENTER_AVAILABILITY_SET",
+
+                        // Choose whether do deploy this instance in Staging or Production environment. defaults to Staging
+
+                        "azure.deployment.slot": "ENTER_DEPLOYMENT_SLOT",
+
+                        /**************************************************************
+                         * Mandatory only for templates used for management machines. *
+                         * Put this file under the path specified in 'localDirectory' *
+                         ***************************************************************/
+
+                        "azure.pfx.file": pfxFile,
+
+                        // Password that was used to create the certificate
+
+                        "azure.pfx.password" : pfxPassword
+                ])
+            },
 				TOMCAT : computeTemplate{
 				
 

@@ -1,5 +1,6 @@
 package org.cloudifysource.quality.iTests.test.cli.cloudify.cloud.azure;
 
+import org.cloudifysource.quality.iTests.framework.utils.CloudBootstrapper;
 import org.cloudifysource.quality.iTests.test.cli.cloudify.cloud.NewAbstractCloudTest;
 import org.testng.annotations.Test;
 
@@ -12,9 +13,13 @@ import org.testng.annotations.Test;
  */
 public class AzureUbuntuTest extends NewAbstractCloudTest {
 
-    @Test(timeOut = DEFAULT_TEST_TIMEOUT , enabled = true)
+    @Test(timeOut = DEFAULT_TEST_TIMEOUT * 5  , enabled = true)
     protected void bootstrap() throws Exception {
-        super.bootstrap();
+
+        CloudBootstrapper bootstrapper= new CloudBootstrapper();
+        bootstrapper.timeoutInMinutes(15);
+
+        super.bootstrap(bootstrapper);
     }
     @Override
     protected void customizeCloud() throws Exception {

@@ -2,11 +2,13 @@ package org.cloudifysource.quality.iTests.test.cli.cloudify.cloud.azure;
 
 import org.cloudifysource.quality.iTests.framework.utils.CloudBootstrapper;
 import org.cloudifysource.quality.iTests.test.cli.cloudify.cloud.NewAbstractCloudTest;
+import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
 /**
  * Created with IntelliJ IDEA.
  * User: inbarc
+ * CLOUDIFY-1503
  * Date: 5/28/13
  * Time: 1:01 PM
  * To change this template use File | Settings | File Templates.
@@ -21,9 +23,19 @@ public class AzureUbuntuTest extends NewAbstractCloudTest {
 
         super.bootstrap(bootstrapper);
     }
+
+    @AfterClass
+    public void teardown() {
+        try {
+            super.teardown();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     @Override
     protected void customizeCloud() throws Exception {
-        super.customizeCloud();    //To change body of overridden methods use File | Settings | File Templates.
+        super.customizeCloud();
         getService().getAdditionalPropsToReplace().put("managementMachineTemplate \"SMALL_LINUX\"", "managementMachineTemplate \"UBUNTU\"")  ;
     }
 
@@ -35,6 +47,6 @@ public class AzureUbuntuTest extends NewAbstractCloudTest {
 
     @Override
     protected boolean isReusableCloud() {
-        return false;  //To change body of implemented methods use File | Settings | File Templates.
+        return false;
     }
 }

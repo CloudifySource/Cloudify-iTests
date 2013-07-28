@@ -1,6 +1,7 @@
 package org.cloudifysource.quality.iTests.test.cli.cloudify.cloud;
 
 import iTests.framework.utils.AssertUtils;
+import iTests.framework.utils.AssertUtils.RepetitiveConditionProvider;
 import iTests.framework.utils.IOUtils;
 import iTests.framework.utils.LogUtils;
 import iTests.framework.utils.SSHUtils;
@@ -28,6 +29,7 @@ import org.cloudifysource.quality.iTests.framework.utils.CloudBootstrapper;
 import org.cloudifysource.quality.iTests.framework.utils.JCloudsUtils;
 import org.cloudifysource.quality.iTests.framework.utils.ServiceInstaller;
 import org.cloudifysource.quality.iTests.test.cli.cloudify.CommandTestUtils;
+import org.cloudifysource.restclient.ErrorStatusException;
 import org.cloudifysource.restclient.GSRestClient;
 import org.cloudifysource.restclient.RestException;
 import org.jclouds.compute.domain.NodeMetadata;
@@ -40,7 +42,9 @@ import com.j_spaces.kernel.PlatformVersion;
  */
 public abstract class AbstractCloudManagementPersistencyTest extends NewAbstractCloudTest{
 
-    private static final String PATH_TO_TOMCAT_SERVICE = CommandTestUtils.getPath("/src/main/resources/apps/USM/usm/custom-tomcat");;
+    private static final String PUBLIC_IP_ADDRESS_REST_POSTFIX = "/Machine/GridServiceAgent/JVMDetails/EnvironmentVariables/GIGASPACES_AGENT_ENV_PUBLIC_IP";
+
+	private static final String PATH_TO_TOMCAT_SERVICE = CommandTestUtils.getPath("/src/main/resources/apps/USM/usm/custom-tomcat");;
 
     private static final String BOOTSTRAP_SUCCEEDED_STRING = "Successfully created Cloudify Manager";
 
@@ -61,7 +65,8 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
 
 	private static final String MOCK_SERVICE_NAME = "mock";
 
-	private String defaultManagementMachineUrl;
+	// active/backup relate to GSM initial state, not to the rest server
+	private String activeManagementMachineUrl;
 	private String backupManagementMachineUrl;
 	GSRestClient client;
 
@@ -105,7 +110,7 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
 	protected void assertServiceInstalled(String applicationName, String serviceName) {
 		try {
 			LogUtils.log("asserting service is installed");
-			String output = CommandTestUtils.runCommandAndWait("connect " + this.defaultManagementMachineUrl +"; list-services");
+			String output = CommandTestUtils.runCommandAndWait("connect " + this.activeManagementMachineUrl +"; list-services");
 			String absolutePUName = ServiceUtils.getAbsolutePUName(applicationName, serviceName);
 			assertTrue("Service " + serviceName + " was not found", output.contains(absolutePUName));
 		} catch (Exception e) {
@@ -116,7 +121,7 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
 	protected void assertApplicationInstalled(String applicationName) {
 		try {
 			LogUtils.log("asserting application is installed");
-			String output = CommandTestUtils.runCommandAndWait("connect " + this.defaultManagementMachineUrl +"; list-applications");
+			String output = CommandTestUtils.runCommandAndWait("connect " + this.activeManagementMachineUrl +"; list-applications");
 			assertTrue("Application " + applicationName + " was not found", output.contains(applicationName));
 		} catch (Exception e) {
 			AssertFail("Could not determin if application is properly installed after restore");
@@ -125,9 +130,9 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
 	
 	protected void restoreManagement() {
 		try {
-			terminateManagementMachineComponents(this.defaultManagementMachineUrl);
+			terminateManagementMachineComponents(this.activeManagementMachineUrl);
 		} catch (Throwable e) {
-			LogUtils.log("failed terminating management machine with ip " + this.defaultManagementMachineUrl);
+			LogUtils.log("failed terminating management machine with ip " + this.activeManagementMachineUrl);
 		}
 		try {
 			terminateManagementMachineComponents(this.backupManagementMachineUrl);
@@ -267,7 +272,7 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
     	
     	LogUtils.log("Killing one of two management machines");
     	terminateManagementMachineComponents(this.backupManagementMachineUrl);
-    	boolean result = waitForRestAdminToDetectMachineFailure(this.defaultManagementMachineUrl, 1, 10000 * 6, TimeUnit.MILLISECONDS);
+    	boolean result = waitForRestAdminToDetectMachineFailure(this.activeManagementMachineUrl, 1, 10000 * 6, TimeUnit.MILLISECONDS);
     	assertTrue("Failed waiting for rest admin to detect machine failure.", result);
     	
     	LogUtils.log("Attemting to uninstall application. This should fail.");
@@ -319,17 +324,24 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
     private String scaleServiceUsingCommand(int numberOfInstances, boolean expectedFail) 
 			throws IOException, InterruptedException {
 		if (expectedFail) {
-			return CommandTestUtils.runCommandExpectedFail("connect " + this.defaultManagementMachineUrl + ";" +
+			return CommandTestUtils.runCommandExpectedFail("connect " + this.activeManagementMachineUrl + ";" +
 					";set-instances " + SCALABLE_SERVICE_NAME + " " + numberOfInstances);
 		} else {
-			return CommandTestUtils.runCommandAndWait("connect " + this.defaultManagementMachineUrl + ";" +
+			return CommandTestUtils.runCommandAndWait("connect " + this.activeManagementMachineUrl + ";" +
 									";set-instances " + SCALABLE_SERVICE_NAME + " " + numberOfInstances);
 		}
 	}
     
     protected void terminateManagementMachineComponents(String restUrl) {
+		runCommand(restUrl, "killall -9 java");
+	}
+    
+    protected void terminateManagementMachineComponent(String restUrl, int pid) {
+		runCommand(restUrl, "kill -9 " + pid);
+	}
+
+	private void runCommand(String restUrl, String command) {
 		File pemFile = getPemFile();
-		String command = "killall -9 java";
 		String ipAddress = restUrl.substring(restUrl.indexOf("//") + 2, restUrl.lastIndexOf(":"));
 		Cloud cloud = getService().getCloud();
 		String managementMachineTemplate = cloud.getConfiguration().getManagementMachineTemplate();
@@ -337,7 +349,6 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
 		String userName = managementTemplate.getUsername();
 		SSHUtils.runCommand(ipAddress, 10000, command, userName, pemFile);
 	}
-    
     
     void assertGsmFailureOutput(String installServiceOutput) {
 		assertTrue("Expecting install failure output to contain gsm info.",
@@ -360,7 +371,7 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
 
     	LogUtils.log("killing backup management machine");
     	terminateManagementMachineComponents(this.backupManagementMachineUrl);
-    	boolean waitForAdminResult = waitForRestAdminToDetectMachineFailure(this.defaultManagementMachineUrl, 1, 1, TimeUnit.MINUTES);
+    	boolean waitForAdminResult = waitForRestAdminToDetectMachineFailure(this.activeManagementMachineUrl, 1, 1, TimeUnit.MINUTES);
     	assertTrue("Failed waiting for rest admin to detect machine failure.", waitForAdminResult == true);
 
     	scaleServiceUsingHook(3);
@@ -381,9 +392,9 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
     	} else if (expectedNumberOfInstances == 3) {
     		counterValue = 1000;
     	}
-    	int numInstances = (Integer)getServiceProperty(this.defaultManagementMachineUrl, SCALABLE_SERVICE_NAME, DEFAULT_APPLICATION_NAME, "Instances-Size");
+    	int numInstances = (Integer)getServiceProperty(this.activeManagementMachineUrl, SCALABLE_SERVICE_NAME, DEFAULT_APPLICATION_NAME, "Instances-Size");
     	for (int i = 0; i < numInstances; i++) {
-    		CommandTestUtils.runCloudifyCommandAndWait("connect  " + this.defaultManagementMachineUrl 
+    		CommandTestUtils.runCloudifyCommandAndWait("connect  " + this.activeManagementMachineUrl 
     				+ ";invoke -instanceid " + (i + 1)  + " --verbose " + SCALABLE_SERVICE_NAME + " set " + counterValue);
     	}
     }
@@ -399,7 +410,7 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
     		throws MalformedURLException, RestException, InterruptedException {
     	long end = System.currentTimeMillis() + unit.toMillis(timeout);
     	while (end > System.currentTimeMillis()) {
-    		int instanceSize = ((Integer)getServiceProperty(this.defaultManagementMachineUrl, 
+    		int instanceSize = ((Integer)getServiceProperty(this.activeManagementMachineUrl, 
     				SCALABLE_SERVICE_NAME, DEFAULT_APPLICATION_NAME, "Instances-Size"));
     		if (instanceSize == expectedNumOfInstances) {
     			return true;
@@ -497,16 +508,26 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
         getService().setNumberOfManagementMachines(numOfManagementMachines);
         getService().getProperties().put("persistencePath", "/home/ec2-user/persistence");
     }
-    
-	protected void initRestClient() 
-			throws MalformedURLException, RestException {
-		this.client = new GSRestClient("", "", new URL(this.defaultManagementMachineUrl), PlatformVersion.getVersionNumber());
-	}
 
-	protected void initManagementUrls() {
-		String[] restUrls = cloudService.getRestUrls();
-    	this.defaultManagementMachineUrl = restUrls[0];
+	protected void initManagementUrlsAndRestClient() throws MalformedURLException, RestException {
+		final String[] restUrls = cloudService.getRestUrls();
+		//final String[] restUrls = new String[] { "http://127.0.0.1:8100", "http://127.0.0.1:8100"};
+		this.activeManagementMachineUrl = restUrls[0];
     	this.backupManagementMachineUrl = restUrls[1];
+    	this.client = new GSRestClient("", "", new URL(this.activeManagementMachineUrl), PlatformVersion.getVersionNumber());
+    	assertTrue(activeManagementMachineUrl + " is unavailable", isRestRunning(client));
+    	final String managingGsmUrl = "ProcessingUnits/Names/rest/ManagingGridServiceManager" + PUBLIC_IP_ADDRESS_REST_POSTFIX;
+    	final String managingGsmHost = (String) client.getAdminData(managingGsmUrl).get("GIGASPACES_AGENT_ENV_PUBLIC_IP");
+    	if (backupManagementMachineUrl.contains(managingGsmHost)) {
+    		//swap rest urls
+    		this.activeManagementMachineUrl = restUrls[1];
+        	this.backupManagementMachineUrl = restUrls[0];
+    	}
+    	assertTrue(activeManagementMachineUrl + " does not contain " + managingGsmHost, activeManagementMachineUrl.contains(managingGsmHost));
+    	
+    	final String backupGsmUrl = "ProcessingUnits/Names/rest/BackupGridServiceManagers/0" + PUBLIC_IP_ADDRESS_REST_POSTFIX;
+    	final String backupGsmHost = (String) client.getAdminData(backupGsmUrl).get("GIGASPACES_AGENT_ENV_PUBLIC_IP");
+        assertTrue(backupManagementMachineUrl + " does not contain " + backupGsmHost, backupManagementMachineUrl.contains(backupGsmHost));
 	}
 
     @Override
@@ -514,4 +535,41 @@ public abstract class AbstractCloudManagementPersistencyTest extends NewAbstract
 
     @Override
     protected abstract boolean isReusableCloud();
+
+	public void testManagementPersistencyTwoFailures() throws Exception {
+		final int restPidOnBackupManagement = getRestPidOnBackupManagementMachine();
+		terminateManagementMachineComponents(activeManagementMachineUrl);
+		terminateManagementMachineComponent(backupManagementMachineUrl, restPidOnBackupManagement);
+		final GSRestClient backupClient = new GSRestClient("", "", new URL(backupManagementMachineUrl), PlatformVersion.getVersionNumber());
+		AssertUtils.repetitiveAssertTrue("Rest PU instance serving " + backupManagementMachineUrl + " is not available.", new RepetitiveConditionProvider (){
+
+			@Override
+			public boolean getCondition() {
+				return isRestRunning(backupClient);
+			}}, OPERATION_TIMEOUT);
+	}
+
+	private boolean isRestRunning(final GSRestClient client) {
+		try {
+			return client.get("service/testrest",null).toString().contains("success");
+		}
+		catch (ErrorStatusException e) {
+			return false;
+		}
+	}
+
+	private int getRestPidOnBackupManagementMachine() throws RestException {
+		int pid = 0;
+		for (int i = 0 ; i <= 1 ; i++) {
+			final String restUrl = "ProcessingUnits/Names/rest/Instances/" + i; 
+			final String restHost = (String) client.getAdminData(restUrl + PUBLIC_IP_ADDRESS_REST_POSTFIX ).get("GIGASPACES_AGENT_ENV_PUBLIC_IP");
+	    	if (backupManagementMachineUrl.contains(restHost)) {
+	    		Map<String, Object> jvmDetails = (Map<String, Object>) client.getAdminData(restUrl).get("JVMDetails");
+	    		pid = Integer.valueOf(jvmDetails.get("Pid").toString());
+	    		break;
+	    	}
+		}
+		AssertUtils.assertFalse("Cannot find rest process id on backup management machine", pid == 0);
+		return pid;
+	}
 }

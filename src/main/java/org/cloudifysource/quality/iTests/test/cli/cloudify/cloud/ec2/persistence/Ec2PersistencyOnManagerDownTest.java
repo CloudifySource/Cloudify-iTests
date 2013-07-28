@@ -37,8 +37,7 @@ public class Ec2PersistencyOnManagerDownTest  extends AbstractCloudManagementPer
 	@BeforeClass(alwaysRun = true)
 	protected void bootstrap() throws Exception {
 		super.bootstrap();
-		super.initManagementUrls();
-		super.initRestClient();
+		super.initManagementUrlsAndRestClient();
 	}
 
 	@Override

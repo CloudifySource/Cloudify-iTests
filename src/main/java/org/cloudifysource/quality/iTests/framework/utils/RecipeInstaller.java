@@ -1,9 +1,16 @@
 package org.cloudifysource.quality.iTests.framework.utils;
 
-import com.j_spaces.kernel.PlatformVersion;
 import iTests.framework.utils.AssertUtils;
 import iTests.framework.utils.IOUtils;
 import iTests.framework.utils.LogUtils;
+
+import java.io.File;
+import java.io.IOException;
+import java.net.URL;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
 import org.apache.commons.lang.StringUtils;
 import org.cloudifysource.dsl.Application;
 import org.cloudifysource.dsl.internal.CloudifyConstants;
@@ -11,8 +18,13 @@ import org.cloudifysource.dsl.internal.DSLReader;
 import org.cloudifysource.dsl.internal.packaging.Packager;
 import org.cloudifysource.dsl.rest.request.InstallApplicationRequest;
 import org.cloudifysource.dsl.rest.request.InstallServiceRequest;
-import org.cloudifysource.dsl.rest.response.*;
-
+import org.cloudifysource.dsl.rest.response.ApplicationDescription;
+import org.cloudifysource.dsl.rest.response.InstallApplicationResponse;
+import org.cloudifysource.dsl.rest.response.InstallServiceResponse;
+import org.cloudifysource.dsl.rest.response.ServiceDescription;
+import org.cloudifysource.dsl.rest.response.UninstallApplicationResponse;
+import org.cloudifysource.dsl.rest.response.UninstallServiceResponse;
+import org.cloudifysource.dsl.rest.response.UploadResponse;
 import org.cloudifysource.quality.iTests.test.AbstractTestSupport;
 import org.cloudifysource.quality.iTests.test.cli.cloudify.CloudTestUtils;
 import org.cloudifysource.quality.iTests.test.cli.cloudify.CommandTestUtils;
@@ -24,12 +36,7 @@ import org.cloudifysource.restclient.exceptions.RestClientException;
 import org.cloudifysource.shell.exceptions.CLIException;
 import org.cloudifysource.shell.rest.RestAdminFacade;
 
-import java.io.File;
-import java.io.IOException;
-import java.net.URL;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import com.j_spaces.kernel.PlatformVersion;
 
 public abstract class RecipeInstaller {
 
@@ -39,6 +46,7 @@ public abstract class RecipeInstaller {
     private boolean disableSelfHealing = false;
     private Map<String, Object> overrideProperties;
     private Map<String, Object> cloudOverrideProperties;
+    private String cloudConfiguration;
     private long timeoutInMinutes;
     private boolean waitForFinish = true;
     private boolean expectToFail = false;
@@ -104,6 +112,15 @@ public abstract class RecipeInstaller {
         return this;
     }
 
+    public String getCloudConfiguration() {
+        return cloudConfiguration;
+    }
+
+    public RecipeInstaller cloudConfiguration(String cloudConfiguration) {
+        this.cloudConfiguration = cloudConfiguration;
+        return this;
+    }
+
     public long getTimeoutInMinutes() {
         return timeoutInMinutes;
     }
@@ -165,11 +182,11 @@ public abstract class RecipeInstaller {
         String recipeName = null;
         if (this instanceof ServiceInstaller) {
             installCommand = "install-service";
-            recipeName = ((ServiceInstaller)this).getServiceName();
+            recipeName = ((ServiceInstaller) this).getServiceName();
             excpectedResult = "Service \"" + recipeName + "\" successfully installed";
         } else if (this instanceof ApplicationInstaller) {
             installCommand = "install-application";
-            recipeName = ((ApplicationInstaller)this).getApplicationName();
+            recipeName = ((ApplicationInstaller) this).getApplicationName();
             excpectedResult = "Application " + recipeName + " installed successfully";
         }
 
@@ -195,6 +212,9 @@ public abstract class RecipeInstaller {
             File serviceOverridesFile = IOUtils.createTempOverridesFile(overrideProperties);
             commandBuilder.append("-overrides").append(" ").append(serviceOverridesFile.getAbsolutePath().replace("\\", "/")).append(" ");
         }
+        if (cloudConfiguration != null && !cloudConfiguration.isEmpty()) {
+            commandBuilder.append("-cloudConfiguration").append(" ").append(cloudConfiguration.replace("\\", "/")).append(" ");
+        }
         if (authGroups != null && !authGroups.isEmpty()) {
             commandBuilder.append("-authGroups").append(" ").append(authGroups).append(" ");
         }
@@ -213,7 +233,8 @@ public abstract class RecipeInstaller {
         }
         if (waitForFinish) {
             String output = CommandTestUtils.runCommandAndWait(connectCommand + ";" + installationCommand);
-            AssertUtils.assertTrue("Installation of " + recipeName + " was expected to succeed, but it failed", output.toLowerCase().contains(excpectedResult.toLowerCase()));
+            AssertUtils.assertTrue("Installation of " + recipeName + " was expected to succeed, but it failed",
+                    output.toLowerCase().contains(excpectedResult.toLowerCase()));
             return output;
         } else {
             return CommandTestUtils.runCommand(connectCommand + ";" + installationCommand);
@@ -227,11 +248,11 @@ public abstract class RecipeInstaller {
         String recipeName = null;
         if (this instanceof ServiceInstaller) {
             uninstallCommand = "uninstall-service";
-            recipeName = ((ServiceInstaller)this).getServiceName();
+            recipeName = ((ServiceInstaller) this).getServiceName();
             excpectedResult = "Successfully undeployed " + recipeName;
         } else if (this instanceof ApplicationInstaller) {
             uninstallCommand = "uninstall-application";
-            recipeName = ((ApplicationInstaller)this).getApplicationName();
+            recipeName = ((ApplicationInstaller) this).getApplicationName();
             excpectedResult = "Application " + recipeName + " uninstalled successfully";
         }
 
@@ -266,12 +287,12 @@ public abstract class RecipeInstaller {
 
     }
 
-    protected String connectCommand(){
+    protected String connectCommand() {
 
         if (restUrl == null || restUrl.isEmpty()) {
             throw new IllegalStateException("Rest URL cannot be null or empty when trying to connect");
         }
-        if(StringUtils.isNotBlank(cloudifyUsername) && StringUtils.isNotBlank(cloudifyPassword)){
+        if (StringUtils.isNotBlank(cloudifyUsername) && StringUtils.isNotBlank(cloudifyPassword)) {
             return "connect -user " + cloudifyUsername + " -password " + cloudifyPassword + " " + getRestUrl();
         }
 
@@ -292,7 +313,7 @@ public abstract class RecipeInstaller {
             final UninstallApplicationResponse response = client.uninstallApplication(recipeName, (int) this.getTimeoutInMinutes());
         }
 
-        if(this.isWaitForFinish()){
+        if (this.isWaitForFinish()) {
             waitForUninstall(url);
         }
 
@@ -302,13 +323,12 @@ public abstract class RecipeInstaller {
         InstallApplicationResponse installApplicationResponse = null;
         InstallServiceResponse installServiceResponse = null;
 
-                String recipeName = null;
+        String recipeName = null;
         if (this instanceof ServiceInstaller) {
             recipeName = ((ServiceInstaller) this).getServiceName();
         } else if (this instanceof ApplicationInstaller) {
             recipeName = ((ApplicationInstaller) this).getApplicationName();
         }
-
 
         final String version = PlatformVersion.getVersion();
         final URL url = new URL(this.getRestUrl());
@@ -317,7 +337,7 @@ public abstract class RecipeInstaller {
         File packedFile = null;
         if (this instanceof ServiceInstaller) {
             packedFile = Packager.pack(new File(this.getRecipePath()));
-        } else if (this instanceof ApplicationInstaller){
+        } else if (this instanceof ApplicationInstaller) {
             final File appFolder = new File(this.getRecipePath());
             final DSLReader dslReader = createDslReader(appFolder);
             final Application application = dslReader.readDslEntity(Application.class);
@@ -331,37 +351,37 @@ public abstract class RecipeInstaller {
             InstallServiceRequest request = new InstallServiceRequest();
             request.setServiceFolderUploadKey(uploadKey);
 
-            //Test will run in unsecured mode.
+            // Test will run in unsecured mode.
             request.setAuthGroups(this.getAuthGroups());
-            //no debugging.
+            // no debugging.
             request.setDebugAll(this.isDebugAll());
             request.setSelfHealing(this.isDisableSelfHealing());
 
-            //set timeout
+            // set timeout
             request.setTimeoutInMillis(AbstractTestSupport.EXTENDED_TEST_TIMEOUT);
-            //make install service API call
+            // make install service API call
             installServiceResponse = client.installService("default", recipeName, request);
         } else if (this instanceof ApplicationInstaller) {
             InstallApplicationRequest request = new InstallApplicationRequest();
             request.setApplcationFileUploadKey(uploadKey);
 
-            //Test will run in unsecured mode.
+            // Test will run in unsecured mode.
             request.setAuthGroups("");
-            //no debugging.
+            // no debugging.
             request.setDebugAll(this.isDebugAll());
             request.setSelfHealing(this.isDisableSelfHealing());
             request.setApplicationName(recipeName);
-            //set timeout
+            // set timeout
             request.setTimeoutInMillis(TimeUnit.MINUTES.toMillis(this.getTimeoutInMinutes()));
 
-            //make install service API call
+            // make install service API call
             installApplicationResponse = client.installApplication(recipeName, request);
         }
-        if(isWaitForFinish()){
-            //wait for the application to reach STARTED state
+        if (isWaitForFinish()) {
+            // wait for the application to reach STARTED state
             waitForInstall(url);
         }
-        return new Object[]{installApplicationResponse, installServiceResponse};
+        return new Object[] { installApplicationResponse, installServiceResponse };
     }
 
     private DSLReader createDslReader(final File recipeFile) {
@@ -378,8 +398,8 @@ public abstract class RecipeInstaller {
         final RestAdminFacade adminFacade = new RestAdminFacade();
         adminFacade.connect(getCloudifyUsername(), getCloudifyPassword(), url.toString(), false);
 
-        LogUtils.log("Waiting for deployment state to be " + CloudifyConstants.DeploymentState.STARTED) ;
-        if(this instanceof ApplicationInstaller){
+        LogUtils.log("Waiting for deployment state to be " + CloudifyConstants.DeploymentState.STARTED);
+        if (this instanceof ApplicationInstaller) {
             AssertUtils.repetitiveAssertTrue(applicationName + " application failed to deploy", new AssertUtils.RepetitiveConditionProvider() {
                 @Override
                 public boolean getCondition() {
@@ -397,10 +417,10 @@ public abstract class RecipeInstaller {
                     }
                     return false;
                 }
-            } , TimeUnit.MINUTES.toMillis(this.getTimeoutInMinutes()));
+            }, TimeUnit.MINUTES.toMillis(this.getTimeoutInMinutes()));
         }
-        else if(this instanceof ServiceInstaller){
-            final String serviceName = ((ServiceInstaller)this).getServiceName();
+        else if (this instanceof ServiceInstaller) {
+            final String serviceName = ((ServiceInstaller) this).getServiceName();
             AssertUtils.repetitiveAssertTrue(serviceName + " service failed to deploy", new AssertUtils.RepetitiveConditionProvider() {
                 @Override
                 public boolean getCondition() {
@@ -418,19 +438,16 @@ public abstract class RecipeInstaller {
                     }
                     return false;
                 }
-            } , TimeUnit.MINUTES.toMillis(this.getTimeoutInMinutes()));
+            }, TimeUnit.MINUTES.toMillis(this.getTimeoutInMinutes()));
         }
     }
-
-
-
 
     public void waitForUninstall(final URL url) throws Exception {
         final RestAdminFacade adminFacade = new RestAdminFacade();
         adminFacade.connect(null, null, url.toString(), false);
 
         LogUtils.log("Waiting for USM_State to be " + CloudifyConstants.USMState.RUNNING);
-        if(this instanceof ApplicationInstaller){
+        if (this instanceof ApplicationInstaller) {
             AssertUtils.repetitiveAssertTrue("uninstall failed for application " + applicationName, new AssertUtils.RepetitiveConditionProvider() {
                 @Override
                 public boolean getCondition() {
@@ -447,11 +464,11 @@ public abstract class RecipeInstaller {
                     }
                     return false;
                 }
-            } , TimeUnit.MINUTES.toMillis(this.getTimeoutInMinutes()));
+            }, TimeUnit.MINUTES.toMillis(this.getTimeoutInMinutes()));
         }
-        else if(this instanceof ServiceInstaller){
-            final GSRestClient client = new GSRestClient("","", new URL(this.getRestUrl()), PlatformVersion.getVersionNumber());
-            final String serviceName = ((ServiceInstaller)this).getServiceName();
+        else if (this instanceof ServiceInstaller) {
+            final GSRestClient client = new GSRestClient("", "", new URL(this.getRestUrl()), PlatformVersion.getVersionNumber());
+            final String serviceName = ((ServiceInstaller) this).getServiceName();
             AssertUtils.repetitiveAssertTrue("uninstall service failed " + serviceName,
                     new AssertUtils.RepetitiveConditionProvider() {
                         @Override

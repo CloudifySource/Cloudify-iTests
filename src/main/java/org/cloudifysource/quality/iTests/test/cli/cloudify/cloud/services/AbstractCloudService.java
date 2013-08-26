@@ -1,10 +1,9 @@
 package org.cloudifysource.quality.iTests.test.cli.cloudify.cloud.services;
 
 import iTests.framework.tools.SGTestHelper;
-import iTests.framework.utils.AssertUtils;
+import iTests.framework.utils.*;
 import iTests.framework.utils.AssertUtils.RepetitiveConditionProvider;
-import iTests.framework.utils.LogUtils;
-import iTests.framework.utils.ScriptUtils;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -15,8 +14,6 @@ import org.apache.commons.lang.StringUtils;
 import org.cloudifysource.domain.cloud.Cloud;
 import org.cloudifysource.dsl.internal.ServiceReader;
 import org.cloudifysource.quality.iTests.framework.utils.CloudBootstrapper;
-import iTests.framework.utils.IOUtils;
-import iTests.framework.utils.WebUtils;
 import org.cloudifysource.quality.iTests.test.cli.cloudify.CloudTestUtils;
 import org.cloudifysource.quality.iTests.test.cli.cloudify.CommandTestUtils;
 import org.cloudifysource.quality.iTests.test.cli.cloudify.security.SecurityConstants;
@@ -35,6 +32,8 @@ public abstract class AbstractCloudService implements CloudService {
     protected static final String UPLOAD_FOLDER = "upload";
     protected static final String CREDENTIALS_FOLDER = System.getProperty("iTests.credentialsFolder",
             SGTestHelper.getSGTestRootDir() + "/src/main/resources/credentials");
+    protected static final boolean enableLogstash = Boolean.parseBoolean(System.getProperty("iTests.enableLogstash"));
+    private static File propsFile = new File(SGTestHelper.getSGTestRootDir() + "/src/main/resources/logstash/logstash.properties");
 
     private static final int TEN_SECONDS_IN_MILLIS = 10000;
 
@@ -134,13 +133,44 @@ public abstract class AbstractCloudService implements CloudService {
     public abstract String getApiKey();
 
     @Override
-    public void init(final String uniqueName) throws IOException {
-        this.cloudUniqueName = uniqueName;
+    public void init(final String uniqueName) throws Exception {
+
+        this.cloudUniqueName = uniqueName.toLowerCase();
         this.cloudFolderName = cloudName + "_" + cloudUniqueName;
         bootstrapper.provider(this.cloudFolderName);
         bootstrapper.setCloudService(this);
         deleteServiceFolders();
         createCloudFolder();
+
+        if(enableLogstash){
+            prepareLogstash(uniqueName);
+        }
+    }
+
+    private void prepareLogstash(String tagClassName) throws Exception {
+
+        String pathToLogstash = SGTestHelper.getSGTestRootDir() + "/src/main/resources/logstash";
+        String preBootstrapScriptPath = getPathToCloudFolder() + "/upload/pre-bootstrap.sh";
+
+        IOUtils.copyFile(pathToLogstash + "/pre-bootstrap.sh", preBootstrapScriptPath);
+
+        String confFilePath = pathToLogstash + "/logstash-shipper.conf";
+        String backupFilePath = IOUtils.backupFile(confFilePath);
+
+        //TODO fix path to build
+        String remoteBuildPath = "/home/ec2-user/gigaspaces";
+        IOUtils.replaceTextInFile(confFilePath, "<path_to_build>", remoteBuildPath);
+        IOUtils.replaceTextInFile(confFilePath, "<test_name>", tagClassName);
+        IOUtils.replaceTextInFile(confFilePath, "<build_number>", System.getProperty("iTests.buildNumber"));
+        IOUtils.replaceTextInFile(confFilePath, "<version>", System.getProperty("cloudifyVersion"));
+        IOUtils.replaceTextInFile(confFilePath, "<suite_name>", System.getProperty("iTests.suiteName"));
+
+        String logstashConfInBuildPath = getPathToCloudFolder() + "/upload/cloudify-overrides/config/logstash";
+        FileUtils.forceMkdir(new File(logstashConfInBuildPath));
+        IOUtils.copyFile(confFilePath, logstashConfInBuildPath + "/logstash-shipper.conf");
+
+        IOUtils.replaceFileWithMove(new File(confFilePath), new File(backupFilePath));
+
     }
 
     @Override
@@ -204,18 +234,13 @@ public abstract class AbstractCloudService implements CloudService {
     @Override
     public void teardownCloud() throws IOException, InterruptedException {
 
+        String[] restUrls = getRestUrls();
         try {
-            String[] restUrls = getRestUrls();
             String url = null;
             if (restUrls != null) {
 
                 try {
                     url = restUrls[0] + "/service/dump/machines/?fileSizeLimit=50000000";
-                    if (this.bootstrapper.isSecured()) {
-                        CloudTestUtils.dumpMachines(restUrls[0], SecurityConstants.USER_PWD_ALL_ROLES, SecurityConstants.USER_PWD_ALL_ROLES);
-                    } else {
-                        CloudTestUtils.dumpMachines(restUrls[0], null, null);
-                    }
                 } catch (Exception e) {
                     LogUtils.log("Failed to create dump for this url - " + url, e);
                 }
@@ -231,6 +256,71 @@ public abstract class AbstractCloudService implements CloudService {
                 scanForLeakedAgentAndManagementNodes();
             } else {
                 // machines were not supposed to be terminated.
+            }
+        }
+
+        if(enableLogstash){
+
+            if(cloudName.equalsIgnoreCase("byon")){
+                for(String restUrl : this.getRestUrls()){
+                    LogUtils.log("mng url: " + restUrl);
+
+                    int startIndex = restUrl.indexOf("/") + 1;
+                    int endIndex  = restUrl.lastIndexOf(":");
+
+                    if(startIndex > 0 && endIndex > -1){
+
+                        String hostIp = restUrl.substring(startIndex, endIndex);
+
+                        LogUtils.log("destroying logstash agent on " + hostIp);
+                        SSHUtils.runCommand(hostIp, SSHUtils.DEFAULT_TIMEOUT, "pkill -9 -f logstash", "tgrid", "tgrid");
+                    }
+                }
+            }
+
+            else{
+                // killing any remaining logstash agent connections
+                Properties props;
+                try {
+                    props = IOUtils.readPropertiesFromFile(propsFile);
+                } catch (final Exception e) {
+                    throw new IllegalStateException("Failed reading properties file : " + e.getMessage());
+                }
+                String logstashHost = props.getProperty("logstash_server_host");
+                File pemFile = new File(SGTestHelper.getSGTestRootDir() + "/src/main/resources/credentials/cloud/ec2/ec2-sgtest-us-east-logstash.pem");
+                String redisSrcDir = "/home/ec2-user/redis-2.6.14/src";
+                String user = "ec2-user";
+                long timeoutMilli = 20 * 1000;
+
+                String output = SSHUtils.runCommand(logstashHost, timeoutMilli, "cd " + redisSrcDir + "; ./redis-cli client list", user, pemFile);
+                int ipAndPortStartIndex;
+                int ipAndPortEndIndex;
+                int currentIndex = 0;
+                String ipAndPort;
+
+                while(true){
+
+                    ipAndPortStartIndex = output.indexOf("addr=", currentIndex) + 5;
+
+                    if(ipAndPortStartIndex == 4){
+                        break;
+                    }
+
+                    ipAndPortEndIndex = output.indexOf(" ", ipAndPortStartIndex);
+                    ipAndPort = output.substring(ipAndPortStartIndex, ipAndPortEndIndex);
+                    currentIndex = ipAndPortEndIndex;
+
+                    for(String restUrl : restUrls){
+
+                        int ipStartIndex = restUrl.indexOf(":") + 3;
+                        String ip = restUrl.substring(ipStartIndex, restUrl.indexOf(":", ipStartIndex));
+                        if(ipAndPort.contains(ip)){
+                            LogUtils.log("shutting down redis client on " + ipAndPort);
+                            SSHUtils.runCommand(logstashHost, timeoutMilli, "cd " + redisSrcDir + "; ./redis-cli client kill " + ipAndPort, user, pemFile);
+                        }
+
+                    }
+                }
             }
         }
     }

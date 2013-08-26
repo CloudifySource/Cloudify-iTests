@@ -186,7 +186,14 @@ public class ByonCloudService extends AbstractCloudService {
     private void replacePreBootstrapScript() throws IOException {
         // use a script that does not install java
         File standardCustomization = new File(this.getPathToCloudFolder() + "/upload", "pre-bootstrap.sh");
-        File customCustomization = new File(SGTestHelper.getSGTestRootDir() + "/src/main/resources/apps/cloudify/cloud/byon/pre-bootstrap.sh");
+        File customCustomization;
+        if(enableLogstash){
+            String pathToLogstash = SGTestHelper.getSGTestRootDir() + "/src/main/resources/logstash";
+            customCustomization = new File(pathToLogstash + "/pre-bootstrap-byon.sh");
+        }
+        else{
+            customCustomization = new File(SGTestHelper.getSGTestRootDir() + "/src/main/resources/apps/cloudify/cloud/byon/pre-bootstrap.sh");
+        }
         IOUtils.replaceFile(standardCustomization, customCustomization);
     }
 

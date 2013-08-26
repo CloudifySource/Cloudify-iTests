@@ -76,8 +76,8 @@ public class ProductExamplesTest extends AbstractLocalCloudTest {
 		String cliOutput = runCommand("connect " + restUrl + ";install-application --verbose " + petclinicDirPath);
 		assertTrue("petclinic app couln't be installed",
 				cliOutput.toLowerCase().contains("application petclinic installed successfully"));
-		
-		
+
+
 	}
 	
 	private void assertPetclinicPageExists() {

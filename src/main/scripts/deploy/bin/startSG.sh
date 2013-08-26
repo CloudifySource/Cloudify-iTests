@@ -85,7 +85,6 @@ S3_MIRROR=${44}
 
 
 
-
  . set-deploy-env.sh
 
  #setup lookup group

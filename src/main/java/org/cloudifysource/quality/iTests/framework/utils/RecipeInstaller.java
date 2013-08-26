@@ -222,6 +222,7 @@ public abstract class RecipeInstaller {
 
     public String uninstall() throws IOException, InterruptedException {
 
+        final boolean enableLogstash = Boolean.parseBoolean(System.getProperty("iTests.enableLogstash"));
         String uninstallCommand = null;
         String excpectedResult = null;
         String recipeName = null;
@@ -235,12 +236,14 @@ public abstract class RecipeInstaller {
             excpectedResult = "Application " + recipeName + " uninstalled successfully";
         }
 
-        String url = null;
-        try {
-            url = restUrl + "/service/dump/machines/?fileSizeLimit=50000000";
-            CloudTestUtils.dumpMachines(restUrl, SecurityConstants.USER_PWD_ALL_ROLES, SecurityConstants.USER_PWD_ALL_ROLES);
-        } catch (final Exception e) {
-            LogUtils.log("Failed to create dump for this url - " + url, e);
+        if(!enableLogstash){
+            String url = null;
+            try {
+                url = restUrl + "/service/dump/machines/?fileSizeLimit=50000000";
+                CloudTestUtils.dumpMachines(restUrl, SecurityConstants.USER_PWD_ALL_ROLES, SecurityConstants.USER_PWD_ALL_ROLES);
+            } catch (final Exception e) {
+                LogUtils.log("Failed to create dump for this url - " + url, e);
+            }
         }
 
         final String uninstallationCommand = new StringBuilder()

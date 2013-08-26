@@ -58,9 +58,7 @@ import org.openspaces.admin.application.Applications;
 import org.openspaces.admin.pu.ProcessingUnit;
 import org.openspaces.admin.pu.ProcessingUnits;
 import org.testng.Assert;
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.AfterSuite;
-import org.testng.annotations.BeforeSuite;
+import org.testng.annotations.*;
 
 import com.gigaspaces.internal.sigar.SigarHolder;
 import com.sun.jersey.api.client.Client;
@@ -74,6 +72,17 @@ public class AbstractLocalCloudTest extends AbstractTestSupport {
 	protected static String restUrl =  "http://127.0.0.1:" + CloudifyConstants.DEFAULT_REST_PORT;
 	protected static final String MANAGEMENT_APPLICATION_NAME = CloudifyConstants.MANAGEMENT_APPLICATION_NAME;
 	protected static final String DEFAULT_APPLICATION_NAME = CloudifyConstants.DEFAULT_APPLICATION_NAME;
+    private static final boolean enableLogstash = Boolean.parseBoolean(System.getProperty("iTests.enableLogstash"));
+
+    @BeforeClass(alwaysRun = true)
+    public void beforeClass(){
+        LogUtils.log("================ Class tests Started ===================");
+    }
+
+    @AfterClass(alwaysRun = true)
+    public void afterClass() throws Exception{
+        LogUtils.log("================ Class tests Finished ===================");
+    }
 
 	protected RepositoryMirrorHelper mirrorHelper = new RepositoryMirrorHelper();
 
@@ -94,7 +103,7 @@ public class AbstractLocalCloudTest extends AbstractTestSupport {
 			assertNecessaryPortsAreOpen();
 			cleanUpCloudifyLocalDir();
 			killLeakedProcesses();
-			
+
 			LocalCloudBootstrapper bootstrapper = new LocalCloudBootstrapper();
 			bootstrapper.verbose(true).timeoutInMinutes(5);
 			bootstrapper.bootstrap();
@@ -458,7 +467,7 @@ public class AbstractLocalCloudTest extends AbstractTestSupport {
 				}
 			}
         }
-        if (!dumpPerformed) {
+        if (!dumpPerformed && !enableLogstash) {
             CloudTestUtils.dumpMachines(restUrl, SecurityConstants.USER_PWD_ALL_ROLES, SecurityConstants.USER_PWD_ALL_ROLES);
         }
 

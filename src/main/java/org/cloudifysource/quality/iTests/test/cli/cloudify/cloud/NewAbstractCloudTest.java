@@ -18,6 +18,7 @@ import org.cloudifysource.quality.iTests.test.cli.cloudify.cloud.services.CloudS
 import org.cloudifysource.quality.iTests.test.cli.cloudify.security.SecurityConstants;
 import org.openspaces.admin.Admin;
 import org.testng.Assert;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
 
@@ -98,6 +99,12 @@ public abstract class NewAbstractCloudTest extends AbstractTestSupport {
         LogUtils.log("Creating test folder");
     }
 
+    //this is here to notify logstash to kill its test agent
+    @AfterMethod
+    public void aferMethod(){
+        LogUtils.log("after method");
+    }
+
     public CloudService getService() {
         return cloudService;
     }
@@ -129,7 +136,7 @@ public abstract class NewAbstractCloudTest extends AbstractTestSupport {
             this.cloudService.setBootstrapper(bootstrapper);
         }
 
-        this.cloudService.init(this.getClass().getSimpleName().toLowerCase());
+        this.cloudService.init(this.getClass().getSimpleName());
 
         LogUtils.log("Customizing cloud");
         customizeCloud();
@@ -381,6 +388,12 @@ public abstract class NewAbstractCloudTest extends AbstractTestSupport {
     }
 
     protected void dumpMachines() {
+
+        final boolean enableLogstash = Boolean.parseBoolean(System.getProperty("iTests.enableLogstash"));
+        if(enableLogstash){
+            return;
+        }
+
         final String restUrl = getRestUrl();
         String url = null;
         try {

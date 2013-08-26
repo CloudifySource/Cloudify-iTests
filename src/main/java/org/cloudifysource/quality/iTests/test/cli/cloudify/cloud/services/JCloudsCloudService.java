@@ -36,8 +36,9 @@ public abstract class JCloudsCloudService extends AbstractCloudService {
     protected final String USER_PROP = "user";
     protected final String API_KEY_PROP = "apiKey";
     protected final String SECURITY_GROUP_PROP = "securityGroup";
+    private static final boolean enableLogstash = Boolean.parseBoolean(System.getProperty("iTests.enableLogstash"));
 
-	private static final String DEFAULT_REST_PORT = "8100";
+    private static final String DEFAULT_REST_PORT = "8100";
 	private static final String MANAGER_ID = "-manager";
 	protected ComputeServiceContext context;
 	
@@ -171,19 +172,21 @@ public abstract class JCloudsCloudService extends AbstractCloudService {
 			LogUtils.log("Killing leaked nodes");
 			for (final ComputeMetadata leakedNode : leakedNodes) {
 				if (leakedNode.getName().contains(MANAGER_ID)) {
-					LogUtils.log("found leaking management machine. attempting to dump logs.");
-					try {
-						String publicAddress = ((NodeMetadata) leakedNode).getPublicAddresses().iterator().next();
-						String managerIp = IPUtils.getSafeIpAddress(publicAddress) + ":" + DEFAULT_REST_PORT;
-						if (getBootstrapper().isSecured()) {
-                            CloudTestUtils.dumpMachines("https://" + managerIp, SecurityConstants.USER_PWD_ALL_ROLES, SecurityConstants.USER_PWD_ALL_ROLES);
-						} else {
-                            CloudTestUtils.dumpMachines("http://" + managerIp, null, null);
-						}
-						LogUtils.log("Leaked management machine logs dumped successfully");
-					} catch (Exception e) {
-						LogUtils.log("Failed getting leaked management machine logs. Reason: " + e.getMessage(), e);
-					}
+                    if(!enableLogstash){
+                        LogUtils.log("found leaking management machine. attempting to dump logs.");
+                        try {
+                            String publicAddress = ((NodeMetadata) leakedNode).getPublicAddresses().iterator().next();
+                            String managerIp = IPUtils.getSafeIpAddress(publicAddress) + ":" + DEFAULT_REST_PORT;
+                            if (getBootstrapper().isSecured()) {
+                                CloudTestUtils.dumpMachines("https://" + managerIp, SecurityConstants.USER_PWD_ALL_ROLES, SecurityConstants.USER_PWD_ALL_ROLES);
+                            } else {
+                                CloudTestUtils.dumpMachines("http://" + managerIp, null, null);
+                            }
+                            LogUtils.log("Leaked management machine logs dumped successfully");
+                        } catch (Exception e) {
+                            LogUtils.log("Failed getting leaked management machine logs. Reason: " + e.getMessage(), e);
+                        }
+                    }
 				}
 				LogUtils.log("Killing node: " + leakedNode.getName() + ": " + leakedNode);
 				try {
